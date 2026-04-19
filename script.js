@@ -3,6 +3,8 @@
 // ═══════════════════════════════════════════════════════════
 
 const STORAGE_KEY = "airc_recent_v2";
+const USAGE_KEY   = "airc_usage_v1";
+const DAILY_LIMIT = 5;
 
 const SAMPLE_INPUT = {
   name: "반려동물 프리미엄 구독 케어 박스",
@@ -73,6 +75,40 @@ function renderRecentSection() {
       nameInput.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// DAILY USAGE LIMIT
+// ═══════════════════════════════════════════════════════════
+
+function getUsageState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(USAGE_KEY) || "{}");
+    const today = new Date().toLocaleDateString("sv-SE"); // "YYYY-MM-DD"
+    if (raw.date !== today) return { date: today, count: 0 };
+    return { date: today, count: Number(raw.count) || 0 };
+  } catch { return { date: new Date().toLocaleDateString("sv-SE"), count: 0 }; }
+}
+
+function canUseToday() {
+  return getUsageState().count < DAILY_LIMIT;
+}
+
+function increaseTodayUsage() {
+  try {
+    const state = getUsageState();
+    state.count += 1;
+    localStorage.setItem(USAGE_KEY, JSON.stringify(state));
+  } catch { /* ignore */ }
+}
+
+function renderUsageStatus() {
+  const el = document.getElementById("usageStatus");
+  if (!el) return;
+  const { count } = getUsageState();
+  const remaining = DAILY_LIMIT - count;
+  el.textContent = `오늘 ${DAILY_LIMIT}회 중 ${count}회 사용`;
+  el.className = remaining <= 0 ? "usage-status usage-limit" : "usage-status";
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -557,6 +593,11 @@ document.getElementById("sampleBtn").addEventListener("click", () => {
 
 // Analyze
 btn.addEventListener("click", async () => {
+  if (!canUseToday()) {
+    alert(`오늘 무료 분석 ${DAILY_LIMIT}회를 모두 사용했습니다.`);
+    return;
+  }
+
   const name = nameInput.value.trim();
   const desc = descInput.value.trim();
 
@@ -580,6 +621,8 @@ btn.addEventListener("click", async () => {
     console.log("현재 recent 목록:", JSON.stringify(getRecent().map(r => ({ name: r.name, verdict: r.verdict, failRate: r.failRate }))));
     console.log("===============================================\n");
     // ────────────────────────────────────────────────────────
+    increaseTodayUsage();
+    renderUsageStatus();
     saveToRecent(name, desc, data.verdictRaw, data.failureRate);
     renderRecentSection();
   } catch (err) {
@@ -624,5 +667,6 @@ document.querySelector(".premium-notify-btn")?.addEventListener("click", () => {
   showToast("알림 신청이 접수됐습니다. 출시 시 안내 드릴게요!");
 });
 
-// Init recent
+// Init
 renderRecentSection();
+renderUsageStatus();
