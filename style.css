@@ -1027,3 +1027,16 @@ textarea { min-height: 200px; resize: vertical; }
   #analyzeBtn { width: 100%; justify-content: center; }
   .sample-btn { text-align: center; }
 }
+
+/* ── Usage Status ── */
+.usage-status {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: #6B7280;
+  text-align: right;
+  letter-spacing: 0.01em;
+}
+.usage-status.usage-limit {
+  color: #DC2626;
+  font-weight: 500;
+}
