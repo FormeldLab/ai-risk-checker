@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>사업 아이디어 판단 리포트</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <main>
+
+    <!-- ══ HERO ══ -->
+    <section class="hero">
+      <div class="hero-badge">VC 투자 검토 리포트 생성기</div>
+      <h1>사업 아이디어를 투자 관점에서 분석하고<br><em>실행 가능 여부</em>를 판단합니다</h1>
+      <p class="hero-sub">실패 확률 · 시장 현실 · 리스크 · 전략 — 다각도 분석 기반 판단 제공</p>
+      <p class="hero-target">창업 준비자 · 신규 사업 검토 · 사내 신사업 담당자를 위한 도구</p>
+      <div class="hero-features">
+        <span class="feat-chip">✦ VC 관점 분석</span>
+        <span class="feat-chip">✦ 리스크 5종 평가</span>
+        <span class="feat-chip">✦ 즉시 실행 액션</span>
+      </div>
+    </section>
+
+    <!-- ══ INPUT ══ -->
+    <div class="input-card">
+      <div class="form-row">
+        <label for="bizName">사업명</label>
+        <input type="text" id="bizName"
+          placeholder="예: 반려동물 구독 케어 박스"
+          autocomplete="off" maxlength="80" />
+      </div>
+      <div class="form-row">
+        <label for="bizDesc">
+          사업 설명
+          <span class="label-hint">자세히 입력할수록 더 정확한 분석이 나옵니다</span>
+        </label>
+        <textarea id="bizDesc"
+          placeholder="아래 질문에 답하듯 입력하세요:
+
+어떤 문제를 해결하나요?
+누가 돈을 내나요?
+얼마에 팔 건가요?
+왜 기존 대안 대신 이걸 선택하나요?
+고객은 어떻게 모을 건가요?"></textarea>
+      </div>
+      <div class="input-footer">
+        <button class="sample-btn" id="sampleBtn">예시로 먼저 보기</button>
+        <button id="analyzeBtn" disabled>
+          <span>리스크 분석 시작</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ══ RECENT ══ -->
+    <div class="recent-wrap" id="recentWrap" style="display:none">
+      <div class="recent-label">최근 분석</div>
+      <div class="recent-list" id="recentList"></div>
+    </div>
+
+    <!-- ══ LOADER ══ -->
+    <div class="loader-wrap" id="loader">
+      <div class="loader-ring"></div>
+      <span class="loader-step" id="loaderStep">사업 구조 분석 중…</span>
+    </div>
+
+    <!-- ══════════════ REPORT ══════════════ -->
+    <div class="report" id="report">
+
+      <!-- Report header -->
+      <div class="report-head">
+        <div class="report-meta">
+          <span class="report-label">VC INVESTMENT REPORT</span>
+          <span class="report-time" id="rTime"></span>
+        </div>
+        <h2 class="report-biz-name" id="rBizName"></h2>
+        <div class="report-actions">
+          <button class="action-btn" id="copyBtn">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+              <rect x="5" y="5" width="8" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M3 11V3a1 1 0 011-1h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            결과 복사
+          </button>
+          <button class="action-btn" id="reanalyzeBtn">다시 분석</button>
+          <button class="action-btn action-btn--primary" id="newBtn">새 아이디어</button>
+        </div>
+      </div>
+
+      <!-- ① Verdict Banner -->
+      <div class="verdict-banner" id="rVerdictBanner">
+        <span class="verdict-badge" id="rVerdict"></span>
+        <span class="verdict-banner-reason" id="rSummaryReason"></span>
+      </div>
+
+      <!-- ② 4-stat row -->
+      <div class="stat-row">
+        <div class="stat-cell">
+          <div class="stat-label">실패 확률</div>
+          <div class="stat-value" id="rFailPct"></div>
+          <div class="stat-sub" id="rFailSub"></div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">시장 진입</div>
+          <div class="stat-value" id="rMarketStat"></div>
+          <div class="stat-sub" id="rMarketStatSub"></div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">자본 효율</div>
+          <div class="stat-value" id="rCapStat"></div>
+          <div class="stat-sub" id="rCapStatSub"></div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">고객 획득</div>
+          <div class="stat-value" id="rAcqStat"></div>
+          <div class="stat-sub" id="rAcqStatSub"></div>
+        </div>
+      </div>
+
+      <!-- ③ Investment Thesis -->
+      <div class="report-block">
+        <div class="block-label">Investment Thesis</div>
+        <div id="rThesis"></div>
+      </div>
+
+      <!-- ④ Score Card + fail rate footer -->
+      <div class="report-block">
+        <div class="block-label">Score Card</div>
+        <div class="score-list" id="rScorecard"></div>
+        <div class="score-footer" id="rScoreFooter"></div>
+      </div>
+
+      <!-- ⑤ Market Reality -->
+      <div class="report-block">
+        <div class="block-label">Market Reality</div>
+        <div id="rMarketReality"></div>
+      </div>
+
+      <!-- ⑥ Execution Gap -->
+      <div class="report-block">
+        <div class="block-label">Execution Gap — 이론 vs 현실</div>
+        <div id="rExecGap"></div>
+      </div>
+
+      <!-- ⑦ Risk Register -->
+      <div class="report-block">
+        <div class="block-label">Risk Register</div>
+        <div id="rRisks"></div>
+      </div>
+
+      <!-- ⑧ Strategy -->
+      <div id="rStrategy"></div>
+
+      <!-- ⑨ Action Plan (전략 액션 + First Steps 통합) -->
+      <div class="report-block" id="rFirstStepBlock">
+        <div class="block-label">Action Plan</div>
+        <ul class="step-list" id="rFirstStep"></ul>
+      </div>
+
+      <!-- ⑩ Report Text (full narrative) -->
+      <div class="report-block" id="rReportTextBlock" style="display:none">
+        <div class="block-label">
+          Full Report
+          <button class="report-text-toggle" id="reportTextToggle">펼치기</button>
+        </div>
+        <div class="report-text-body" id="rReportText" style="display:none"></div>
+      </div>
+
+      <!-- Premium Teaser -->
+      <div class="premium-section">
+        <div class="premium-header">
+          <div class="premium-badge">PREMIUM</div>
+          <div class="premium-coming">준비 중</div>
+        </div>
+        <div class="premium-title">심층 분석 전체 보기</div>
+        <p class="premium-desc">지금보다 더 깊은 분석과 실행 도구를 제공할 예정입니다</p>
+        <ul class="premium-features">
+          <li><span class="lock-icon">🔒</span>전체 리스크 리포트 PDF 다운로드</li>
+          <li><span class="lock-icon">🔒</span>아이디어 개선 버전 자동 제안</li>
+          <li><span class="lock-icon">🔒</span>유사 사업 비교 분석</li>
+          <li><span class="lock-icon">🔒</span>실행 계획 체크리스트 내보내기</li>
+        </ul>
+        <button class="premium-notify-btn">출시 알림 받기</button>
+      </div>
+
+      <p class="report-footer">Claude AI 분석 · AI Risk Checker</p>
+
+    </div>
+    <!-- ═══════════════════════════════ -->
+
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
