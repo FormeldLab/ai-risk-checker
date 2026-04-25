@@ -270,63 +270,128 @@ RULES:
 - If description says 자영업자/소상공인/사업자 are customers → target_customer must clearly reflect this B2B context.
 `;
 
+// ── 라벨 기반 전처리 (타겟:, 가격대:, 채널: 등 → 최우선 매핑) ────────────────
+function extractLabels(desc) {
+  const out = {};
+  const rules = [
+    { re: /^(?:타겟|대상\s*고객|타겟\s*고객)\s*[:：]\s*(.+)$/m,              key: "target_customer" },
+    { re: /^(?:가격대?|가격[\/\s]*과금|과금\s*방식|수익\s*모델)\s*[:：]\s*(.+)$/m, key: "revenue_model" },
+    { re: /^(?:채널|유입\s*채널|마케팅\s*채널|고객\s*획득)\s*[:：]\s*(.+)$/m,  key: "acquisition_channel" },
+    { re: /^(?:특징|차별화[^\s:]*|강점)\s*[:：]\s*(.+)$/m,                   key: "differentiation_source" },
+    { re: /^(?:운영|운영\s*방식|서비스\s*방식)\s*[:：]\s*(.+)$/m,             key: "operating_model" },
+    { re: /^경쟁사\s*[:：]\s*(.+)$/m,                                       key: "_competitor" },
+  ];
+  for (const { re, key } of rules) {
+    const m = desc.match(re);
+    if (m && !out[key]) out[key] = m[1].trim();
+  }
+  if (out._competitor && !out.differentiation_source) {
+    out.differentiation_source = `경쟁사 대비: ${out._competitor}`;
+  }
+  delete out._competitor;
+  return out;
+}
+
+// ── 정규식 기반 최소 폴백 추출 (JSON 파싱 실패 시 사용) ──────────────────────
+function regexFallbackExtract(name, desc) {
+  const text = `${name}\n${desc}`;
+  const labeled = extractLabels(desc);
+
+  function grab(re) {
+    const m = text.match(re);
+    return m ? m[0].trim().slice(0, 120) : null;
+  }
+
+  return {
+    target_customer:        labeled.target_customer
+                            || grab(/(?:30~?40대|직장인|소상공인|자영업자|사장님|반려인)[^\n]{0,60}/)
+                            || "불명확",
+    revenue_model:          labeled.revenue_model
+                            || grab(/월\s*[\d,]+\s*원[^\n]{0,40}/)
+                            || grab(/(?:구독|월정액)[^\n]{0,40}/)
+                            || "불명확",
+    acquisition_channel:    labeled.acquisition_channel
+                            || grab(/(?:인스타그램|유튜브|SNS|인플루언서|커뮤니티|광고|바이럴|협업)[^\n]{0,80}/)
+                            || "불명확",
+    operating_model:        labeled.operating_model || "불명확",
+    differentiation_source: labeled.differentiation_source
+                            || grab(/(?:차별화|강점|기존.{0,6}대비|왜.{0,6}선택)[^\n]{0,80}/)
+                            || "불명확",
+    repeat_purchase_basis:  "불명확",
+    expansion_path:         labeled.expansion_path
+                            || grab(/(?:바이럴|추천\s*구조|인플루언서|커뮤니티)[^\n]{0,60}/)
+                            || "불명확",
+  };
+}
+
 // ── 서버 사이드 점수 계산 (결정론적 규칙 테이블) ──────────────────────────────
-function computeScores(extraction) {
+function computeScores(extraction, rawDesc = "") {
   const {
-    target_customer        = "명시 없음",
-    revenue_model          = "명시 없음",
-    acquisition_channel    = "명시 없음",
-    operating_model        = "명시 없음",
-    differentiation_source = "명시 없음",
-    expansion_path         = "명시 없음"
+    target_customer        = "불명확",
+    revenue_model          = "불명확",
+    acquisition_channel    = "불명확",
+    operating_model        = "불명확",
+    differentiation_source = "불명확",
+    expansion_path         = "불명확"
   } = extraction;
+
+  // rawDesc 힌트 — 추출이 "불명확"이어도 원본에 정보가 있으면 감점 완화
+  const rawHasDiff   = /차별화|강점|기존.{0,10}대비|수의사|큐레이션|특허|독점|맞춤/.test(rawDesc);
+  const rawHasCh     = /인스타|유튜브|SNS|커뮤니티|인플루언서|광고|바이럴|협업|플랫폼/.test(rawDesc);
+  const rawHasSub    = /구독|월정액|월\s*[\d,]+\s*원/.test(rawDesc);
+  const rawHasB2B    = /소상공인|자영업자|사장|매장/.test(rawDesc);
+  const rawHasViral  = /바이럴|추천|입소문/.test(rawDesc);
+
+  const diffBlank    = differentiation_source === "불명확" && !rawHasDiff;
+  const chBlank      = acquisition_channel    === "불명확" && !rawHasCh;
 
   // ── market_entry (높을수록 진입 어려움, 범위 4–9) ──
   let me;
-  if (/소상공인|자영업자|사장|매장/.test(target_customer)) me = 7;
-  else if (/기업|법인|B2B|엔터프라이즈/.test(target_customer))  me = 7;
-  else me = 6; // 일반 소비자 B2C
-  if (differentiation_source === "불명확") me += 1;
+  const tcText = target_customer === "불명확" ? rawDesc : target_customer;
+  if (/소상공인|자영업자|사장|매장/.test(tcText)) me = 7;
+  else if (/기업|법인|B2B|엔터프라이즈/.test(tcText)) me = 7;
+  else me = 6;
+  if (diffBlank) me += 1;
   if (/독점.{0,6}데이터|특허|하드웨어.{0,4}통합/.test(differentiation_source)) me -= 1;
   me = Math.min(9, Math.max(4, me));
 
   // ── differentiation (높을수록 차별화 용이, 범위 3–8) ──
+  const diffText = differentiation_source === "불명확" ? rawDesc : differentiation_source;
   let diff;
-  if (differentiation_source === "불명확") {
+  if (diffBlank) {
     diff = 3;
-  } else if (/하드웨어.{0,6}소프트웨어|네트워크.{0,4}효과/.test(differentiation_source)) {
+  } else if (/하드웨어.{0,6}소프트웨어|네트워크.{0,4}효과/.test(diffText)) {
     diff = 8;
-  } else if (/독점.{0,6}데이터|특허/.test(differentiation_source)) {
+  } else if (/독점.{0,6}데이터|특허/.test(diffText)) {
     diff = 7;
-  } else if (/기존.{0,6}시스템.{0,6}연동|독자.{0,6}분석/.test(differentiation_source)) {
+  } else if (/기존.{0,6}시스템.{0,6}연동|독자.{0,6}분석/.test(diffText)) {
     diff = 6;
-  } else if (/API.{0,6}통합|단일.{0,6}채널.{0,6}자동화/.test(differentiation_source)) {
+  } else if (/API.{0,6}통합|단일.{0,6}채널.{0,6}자동화/.test(diffText)) {
     diff = 5;
-  } else if (/UI.{0,4}개선|자동화/.test(differentiation_source)) {
-    diff = 4;
   } else {
-    diff = 4; // fallback
+    diff = 4;
   }
   if (/데이터.{0,4}축적|네트워크.{0,4}효과/.test(expansion_path)) diff += 1;
-  if (acquisition_channel === "불명확") diff -= 1;
+  if (chBlank) diff -= 1;
   diff = Math.min(8, Math.max(3, diff));
 
   // ── capital_efficiency (높을수록 자본 효율 좋음, 범위 3–9) ──
-  let ce;
-  const priceMatch = revenue_model.match(/(\d[\d,]+)\s*원/);
+  const revText  = revenue_model === "불명확" ? rawDesc : revenue_model;
+  const priceMatch = revText.match(/(\d[\d,]+)\s*원/);
   const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ""), 10) : 0;
-  if (/월\s*구독|월정액|구독/.test(revenue_model)) {
+  let ce;
+  if (/월\s*구독|월정액|구독/.test(revText) || rawHasSub) {
     if      (price >= 50000) ce = 8;
     else if (price >= 30000) ce = 7;
     else if (price >= 10000) ce = 6;
     else if (price >  0)     ce = 5;
-    else                     ce = 6; // 구독이지만 가격 미명시
-  } else if (/건당|프로젝트/.test(revenue_model)) {
+    else                     ce = 6;
+  } else if (/건당|프로젝트/.test(revText)) {
     ce = 5;
-  } else if (/수수료|%/.test(revenue_model)) {
+  } else if (/수수료|%/.test(revText)) {
     ce = 4;
   } else {
-    ce = 4; // 명시 없음
+    ce = 4;
   }
   if (/오프라인|현장|하드웨어|수동/.test(operating_model)) ce -= 1;
   if (/SaaS|완전.{0,4}자동화|API.{0,4}전용/.test(operating_model)) ce += 1;
@@ -334,17 +399,19 @@ function computeScores(extraction) {
 
   // ── customer_acquisition (높을수록 획득 어려움, 범위 4–9) ──
   let ca;
-  if (acquisition_channel === "불명확") {
+  if (chBlank) {
     ca = 8;
   } else {
-    const parts = acquisition_channel.split(/[,+·\/&]/).map(s => s.trim()).filter(Boolean);
-    if      (parts.length >= 3) ca = 5;
-    else if (parts.length === 2) ca = 6;
-    else                         ca = 7;
-    if (/SEO|콘텐츠.{0,4}마케팅|플랫폼.{0,4}입점/.test(acquisition_channel)) ca = Math.min(ca, 5);
+    const chText = acquisition_channel !== "불명확" ? acquisition_channel : rawDesc;
+    const parts  = chText.split(/[,+·\/&\n]/).map(s => s.trim())
+                         .filter(s => /인스타|유튜브|SNS|커뮤니티|인플루언서|광고|바이럴|협업|플랫폼/.test(s));
+    if      (parts.length >= 3 || acquisition_channel.split(/[,+·\/&]/).length >= 3) ca = 5;
+    else if (parts.length >= 2 || acquisition_channel.split(/[,+·\/&]/).length >= 2) ca = 6;
+    else                                                                              ca = 7;
+    if (/SEO|콘텐츠.{0,4}마케팅|플랫폼.{0,4}입점/.test(chText)) ca = Math.min(ca, 5);
   }
-  if (/소상공인|자영업자/.test(target_customer)) ca += 1;
-  if (/바이럴|추천/.test(expansion_path)) ca -= 1;
+  if (/소상공인|자영업자/.test(tcText)) ca += 1;
+  if (/바이럴|추천/.test(expansion_path) || rawHasViral) ca -= 1;
   ca = Math.min(9, Math.max(4, ca));
 
   return { market_entry: me, differentiation: diff, capital_efficiency: ce, customer_acquisition: ca };
@@ -452,6 +519,13 @@ app.post("/analyze", async (req, res) => {
   }
 
   try {
+    // ── Step 0: 라벨 기반 전처리 (타겟:, 가격대:, 채널: 등) — 최우선 신호 ──────
+    const labelExtraction = extractLabels(desc);
+    const hasLabels = Object.keys(labelExtraction).length > 0;
+    if (hasLabels) {
+      console.log("\n[LABEL PRE-PROCESS] 라벨 필드 감지:", JSON.stringify(labelExtraction));
+    }
+
     // ── CALL 1: Extract structured input facts ─────────────────────────
     dbgLog("\n========== [CALL 1] INPUT EXTRACTION ==========");
     const extractRaw = await callAnthropic(
@@ -463,20 +537,32 @@ app.post("/analyze", async (req, res) => {
 
     let extraction;
     try {
-      extraction = parseJSON(extractRaw);
+      const claudeExtraction = parseJSON(extractRaw);
+      dbgLog("Claude raw extraction:", JSON.stringify(claudeExtraction, null, 2));
+      // 라벨 전처리 결과가 Claude 결과를 덮어씀 (라벨이 최우선)
+      extraction = { ...claudeExtraction, ...labelExtraction };
     } catch (e) {
-      dbgLog("Extraction parse failed:", e.message, "— using fallbacks");
-      extraction = {
-        target_customer: "불명확", revenue_model: "불명확",
-        acquisition_channel: "불명확", operating_model: "불명확",
-        differentiation_source: "불명확", repeat_purchase_basis: "불명확",
-        expansion_path: "불명확"
-      };
+      dbgLog("Extraction parse failed:", e.message, "— regex fallback 사용");
+      const regexResult = regexFallbackExtract(name, desc);
+      extraction = { ...regexResult, ...labelExtraction };
     }
-    dbgLog("Extracted:", JSON.stringify(extraction, null, 2));
+
+    // "불명확" 값은 rawDesc 힌트로 보완 (Claude가 놓친 경우 대비)
+    const rawHints = regexFallbackExtract(name, desc);
+    for (const key of Object.keys(rawHints)) {
+      if (extraction[key] === "불명확" && rawHints[key] !== "불명확") {
+        extraction[key] = rawHints[key];
+        dbgLog(`[HINT FILL] ${key}: "${rawHints[key]}"`);
+      }
+    }
+
+    console.log("\n========== [EXTRACTION RESULT] ==========");
+    console.log(JSON.stringify(extraction, null, 2));
+    console.log("==========================================\n");
+    dbgLog("Final extraction:", JSON.stringify(extraction, null, 2));
 
     // ── 서버 사이드 점수 계산 (결정론적) ─────────────────────────────────────
-    const scores = computeScores(extraction);
+    const scores = computeScores(extraction, desc);
     const { market_entry: me, differentiation: diff, capital_efficiency: ce, customer_acquisition: ca } = scores;
     dbgLog("Server-computed scores:", JSON.stringify(scores));
 
